@@ -54,6 +54,8 @@ class Settings:
     mail_api_mailbox_token_header: str
     mail_api_create_path: str
     mail_api_inbox_path: str
+    mail_api_email_time: str | None
+    mail_api_include_dashboard: bool
     mail_default_domain: str | None
 
     @classmethod
@@ -84,10 +86,17 @@ class Settings:
             mail_api_mailbox_token_header=os.getenv(
                 "MAIL_API_MAILBOX_TOKEN_HEADER", "X-Mailbox-Token"
             ),
-            mail_api_create_path=os.getenv("MAIL_API_CREATE_PATH", "/mailboxes"),
-            mail_api_inbox_path=os.getenv(
-                "MAIL_API_INBOX_PATH", "/mailboxes/{mailbox_id}/messages"
+            mail_api_create_path=os.getenv(
+                "MAIL_API_CREATE_PATH", "/api/v1/emails/create"
             ),
+            mail_api_inbox_path=os.getenv(
+                "MAIL_API_INBOX_PATH", "/api/v1/emails/{mailbox_id}/messages"
+            ),
+            mail_api_email_time=os.getenv("MAIL_API_EMAIL_TIME") or None,
+            mail_api_include_dashboard=os.getenv(
+                "MAIL_API_INCLUDE_DASHBOARD", "true"
+            ).lower()
+            == "true",
             mail_default_domain=os.getenv("MAIL_DEFAULT_DOMAIN") or None,
         )
 
@@ -220,11 +229,24 @@ class MailProvider:
         if address:
             payload["address"] = address
 
-        response = await self.client.post(
-            self._url(self.settings.mail_api_create_path),
-            headers=self._headers(),
-            json=payload,
-        )
+        # Boomlify creates API mailboxes with query parameters and no JSON body.
+        # Keep the JSON contract for other providers using the generic adapter.
+        is_boomlify = self.settings.mail_api_create_path.rstrip("/") == "/api/v1/emails/create"
+        if is_boomlify:
+            params = {}
+            if self.settings.mail_api_email_time:
+                params["time"] = self.settings.mail_api_email_time
+            response = await self.client.post(
+                self._url(self.settings.mail_api_create_path),
+                headers=self._headers(),
+                params=params,
+            )
+        else:
+            response = await self.client.post(
+                self._url(self.settings.mail_api_create_path),
+                headers=self._headers(),
+                json=payload,
+            )
         response.raise_for_status()
         data = response.json()
         if not isinstance(data, dict):
@@ -258,7 +280,15 @@ class MailProvider:
         response = await self.client.get(
             self._url(path),
             headers=self._headers(mailbox.get("provider_token")),
-            params={"limit": 10},
+            params={
+                "limit": 10,
+                "offset": 0,
+                **(
+                    {"include_dashboard": "true"}
+                    if self.settings.mail_api_include_dashboard
+                    else {}
+                ),
+            },
         )
         response.raise_for_status()
         return normalize_list(response.json())

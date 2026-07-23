@@ -13,7 +13,12 @@ pip install -r requirements.txt
 Copy-Item .env.example .env
 ```
 
-Fill `.env` with your rotated Telegram token, Supabase service-role key, mail provider key, and the provider API URL/path contract. The mail provider contract expected by `bot.py` is:
+Fill `.env` with your rotated Telegram token, Supabase service-role key, and mail provider key. Boomlify is configured by default:
+
+- `POST https://v1.boomlify.com/api/v1/emails/create`
+- `GET https://v1.boomlify.com/api/v1/emails/{id}/messages?include_dashboard=true`
+
+`MAIL_API_EMAIL_TIME` may be `10min`, `1hour`, `1day`, or `permanent`. Boomlify message retrieval may require a paid plan and credits. For another provider, the generic mail provider contract expected by `bot.py` is:
 
 - `POST MAIL_API_CREATE_PATH` with JSON `{ "address": "optional", "password": "generated" }`
 - a JSON object containing `address` or `email`, and optionally `id`/`mailbox_id` and `token`/`access_token`
