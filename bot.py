@@ -18,9 +18,10 @@ from typing import Any
 
 import httpx
 from dotenv import load_dotenv
-from telegram import Update
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import (
     Application,
+    CallbackQueryHandler,
     CommandHandler,
     ContextTypes,
 )
@@ -282,6 +283,19 @@ def format_message(message: dict[str, Any]) -> str:
     return f"• {str(subject)[:90]}\n  from: {str(sender)[:90]}\n  at: {str(received)[:40]}"
 
 
+def control_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [InlineKeyboardButton("✉ CREATE MAILBOX", callback_data="newmail")],
+            [
+                InlineKeyboardButton("▣ INBOX", callback_data="inbox"),
+                InlineKeyboardButton("◉ STATUS", callback_data="status"),
+            ],
+            [InlineKeyboardButton("? HELP", callback_data="help")],
+        ]
+    )
+
+
 class TMailBot:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
@@ -318,11 +332,27 @@ class TMailBot:
             "/inbox    show safe message metadata\n"
             "/status   show active mailbox\n"
             "/help     show commands\n\n"
-            "Verification codes and message bodies are not displayed."
+            "Verification codes and message bodies are not displayed.",
+            reply_markup=control_keyboard(),
         )
 
     async def help(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if await self.authorized(update):
+            await self.start(update, context)
+
+    async def button(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        query = update.callback_query
+        if not query:
+            return
+        await query.answer()
+        action = query.data or "help"
+        if action == "newmail":
+            await self.newmail(update, context)
+        elif action == "inbox":
+            await self.inbox(update, context)
+        elif action == "status":
+            await self.status(update, context)
+        else:
             await self.start(update, context)
 
     async def newmail(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -343,7 +373,8 @@ class TMailBot:
                 f"address: {mailbox['address']}\n"
                 "status:  ACTIVE\n"
                 "╚═══════════════════╝\n\n"
-                "Use /inbox to view non-sensitive message metadata."
+                "Use /inbox to view non-sensitive message metadata.",
+                reply_markup=control_keyboard(),
             )
         except (httpx.HTTPError, RuntimeError) as exc:
             log.exception("Mailbox creation failed")
@@ -354,10 +385,14 @@ class TMailBot:
             return
         mailbox = await self.store.latest_mailbox(update.effective_chat.id)
         if not mailbox:
-            await update.effective_message.reply_text("[i] no mailbox yet — use /newmail")
+            await update.effective_message.reply_text(
+                "[i] no mailbox yet — use /newmail",
+                reply_markup=control_keyboard(),
+            )
             return
         await update.effective_message.reply_text(
-            f"ACTIVE MAILBOX\naddress: {mailbox['address']}\ncreated: {mailbox.get('created_at', '')}"
+            f"ACTIVE MAILBOX\naddress: {mailbox['address']}\ncreated: {mailbox.get('created_at', '')}",
+            reply_markup=control_keyboard(),
         )
 
     async def inbox(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -365,7 +400,10 @@ class TMailBot:
             return
         mailbox = await self.store.latest_mailbox(update.effective_chat.id)
         if not mailbox:
-            await update.effective_message.reply_text("[i] no mailbox yet — use /newmail")
+            await update.effective_message.reply_text(
+                "[i] no mailbox yet — use /newmail",
+                reply_markup=control_keyboard(),
+            )
             return
         try:
             messages = await self.provider.list_messages(mailbox)
@@ -377,7 +415,10 @@ class TMailBot:
                 lines.extend(["", f"[{hidden} sensitive verification message(s) hidden]"])
             if not visible and not hidden:
                 lines.append("(empty)")
-            await update.effective_message.reply_text("\n".join(lines))
+            await update.effective_message.reply_text(
+                "\n".join(lines),
+                reply_markup=control_keyboard(),
+            )
         except httpx.HTTPError as exc:
             log.exception("Inbox fetch failed")
             await update.effective_message.reply_text(f"[!] provider error: {str(exc)[:180]}")
@@ -408,6 +449,7 @@ def build_application(settings: Settings) -> Application:
     application.add_handler(CommandHandler("newmail", service.newmail))
     application.add_handler(CommandHandler("status", service.status))
     application.add_handler(CommandHandler("inbox", service.inbox))
+    application.add_handler(CallbackQueryHandler(service.button))
     return application
 
 
